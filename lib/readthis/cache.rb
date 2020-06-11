@@ -53,12 +53,22 @@ module Readthis
         Redis.new(options.fetch(:redis, {}))
       end
 
-      @read_pool = ConnectionPool.new(pool_options(options)) do
-        Redis.new(options.fetch(:redis_read, {}))
+      read_config = options.fetch(:redis_read, {})
+      @read_pool = if read_config.present?
+        ConnectionPool.new(read_pool_options(options)) do
+          Redis.new(read_config)
+        end
+      else
+        @pool               
       end
 
-      @write_pool = ConnectionPool.new(pool_options(options)) do
-        Redis.new(options.fetch(:redis_write, {}))
+      write_config = options.fetch(:redis_write, {})
+      @write_pool = if read_config.present?
+        ConnectionPool.new(write_pool_options(options)) do
+          Redis.new(write_config)
+        end
+      else
+        @pool
       end
     end
 
@@ -382,6 +392,16 @@ module Readthis
     def pool_options(options)
       { size:    options.fetch(:pool_size, 5),
         timeout: options.fetch(:pool_timeout, 5) }
+    end
+
+    def read_pool_options(options)
+      { size:    options.fetch(:read_pool_size, 5),
+        timeout: options.fetch(:read_pool_timeout, 5) }
+    end
+
+    def write_pool_options(options)
+      { size:    options.fetch(:write_pool_size, 5),
+        timeout: options.fetch(:write_pool_timeout, 5) }
     end
 
     def namespaced_key(key, options)
