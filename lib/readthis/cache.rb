@@ -7,7 +7,7 @@ require 'connection_pool'
 
 module Readthis
   class Cache
-    attr_reader :entity, :expires_in, :namespace, :options, :pool
+    attr_reader :entity, :expires_in, :namespace, :options, :pool, :read_pool, :write_pool
 
     # Provide a class level lookup of the proper notifications module.
     # Instrumention is expected to occur within applications that have
@@ -52,6 +52,14 @@ module Readthis
       @pool = ConnectionPool.new(pool_options(options)) do
         Redis.new(options.fetch(:redis, {}))
       end
+
+      @read_pool = ConnectionPool.new(pool_options(options)) do
+        Redis.new(options.fetch(:redis_read, {}))
+      end
+
+      @write_pool = ConnectionPool.new(pool_options(options)) do
+        Redis.new(options.fetch(:redis_write, {}))
+      end
     end
 
     # Fetches data from the cache, using the given key. If there is data in
@@ -67,7 +75,7 @@ module Readthis
     #   cache.read('matched') # => 'some value'
     #
     def read(key, options = {})
-      invoke(:read, key) do |store|
+      invoke_read(:read, key) do |store|
         value = store.get(namespaced_key(key, merged_options(options)))
 
         entity.load(value)
@@ -89,7 +97,7 @@ module Readthis
     def write(key, value, options = {})
       options = merged_options(options)
 
-      invoke(:write, key) do |store|
+      invoke_write(:write, key) do |store|
         write_entity(key, value, store, options)
       end
     end
@@ -107,7 +115,7 @@ module Readthis
     def delete(key, options = {})
       namespaced = namespaced_key(key, merged_options(options))
 
-      invoke(:delete, key) do |store|
+      invoke_write(:delete, key) do |store|
         store.del(namespaced) > 0
       end
     end
@@ -171,7 +179,7 @@ module Readthis
     #   cache.increment('counter', 2) # => 3
     #
     def increment(key, amount = 1, options = {})
-      invoke(:incremenet, key) do |store|
+      invoke_write(:incremenet, key) do |store|
         alter(key, amount, options)
       end
     end
@@ -192,7 +200,7 @@ module Readthis
     #   cache.decrement('counter', 2) # => 17
     #
     def decrement(key, amount = 1, options = {})
-      invoke(:decrement, key) do |store|
+      invoke_write(:decrement, key) do |store|
         alter(key, amount * -1, options)
       end
     end
@@ -217,7 +225,7 @@ module Readthis
 
       return {} if keys.empty?
 
-      invoke(:read_multi, keys) do |store|
+      invoke_read(:read_multi, keys) do |store|
         values = store.mget(mapping).map { |value| entity.load(value) }
 
         keys.zip(values).to_h
@@ -240,7 +248,7 @@ module Readthis
     def write_multi(hash, options = {})
       options = merged_options(options)
 
-      invoke(:write_multi, hash.keys) do |store|
+      invoke_write(:write_multi, hash.keys) do |store|
         store.multi do
           hash.each { |key, value| write_entity(key, value, store, options) }
         end
@@ -271,7 +279,7 @@ module Readthis
       extracted = extract_options!(keys)
       missing   = {}
 
-      invoke(:fetch_multi, keys) do |store|
+      invoke_read(:fetch_multi, keys) do |store|
         results.each do |key, value|
           if value.nil?
             value = yield(key)
@@ -297,7 +305,7 @@ module Readthis
     #   cache.exist?('some-key', namespace: 'cache') # => true
     #
     def exist?(key, options = {})
-      invoke(:exist?, key) do |store|
+      invoke_read(:exist?, key) do |store|
         store.exists(namespaced_key(key, merged_options(options)))
       end
     end
@@ -311,7 +319,7 @@ module Readthis
     #
     #   cache.clear #=> 'OK'
     def clear(options = {})
-      invoke(:clear, '*', &:flushdb)
+      invoke_write(:clear, '*', &:flushdb)
     end
 
     protected
@@ -345,6 +353,18 @@ module Readthis
     def invoke(operation, key, &block)
       instrument(operation, key) do
         pool.with(&block)
+      end
+    end
+
+    def invoke_read(operation, key, &block)
+      instrument(operation, key) do
+        read_pool.with(&block)
+      end
+    end
+
+    def invoke_write(operation, key, &block)
+      instrument(operation, key) do
+        write_pool.with(&block)
       end
     end
 
