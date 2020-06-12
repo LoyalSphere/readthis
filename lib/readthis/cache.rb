@@ -63,7 +63,7 @@ module Readthis
       end
 
       write_config = options.fetch(:redis_write, {})
-      @write_pool = if read_config.present?
+      @write_pool = if write_config.present?
         ConnectionPool.new(write_pool_options(options)) do
           Redis.new(write_config)
         end
