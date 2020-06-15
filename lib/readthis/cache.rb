@@ -59,15 +59,6 @@ module Readthis
           Redis.new(read_config)
         end
       else
-        @pool               
-      end
-
-      write_config = options.fetch(:redis_write, {})
-      @write_pool = if read_config.present?
-        ConnectionPool.new(write_pool_options(options)) do
-          Redis.new(write_config)
-        end
-      else
         @pool
       end
     end
@@ -107,7 +98,7 @@ module Readthis
     def write(key, value, options = {})
       options = merged_options(options)
 
-      invoke_write(:write, key) do |store|
+      invoke(:write, key) do |store|
         write_entity(key, value, store, options)
       end
     end
@@ -125,7 +116,7 @@ module Readthis
     def delete(key, options = {})
       namespaced = namespaced_key(key, merged_options(options))
 
-      invoke_write(:delete, key) do |store|
+      invoke(:delete, key) do |store|
         store.del(namespaced) > 0
       end
     end
@@ -189,7 +180,7 @@ module Readthis
     #   cache.increment('counter', 2) # => 3
     #
     def increment(key, amount = 1, options = {})
-      invoke_write(:incremenet, key) do |store|
+      invoke(:incremenet, key) do |store|
         alter(key, amount, options)
       end
     end
@@ -210,7 +201,7 @@ module Readthis
     #   cache.decrement('counter', 2) # => 17
     #
     def decrement(key, amount = 1, options = {})
-      invoke_write(:decrement, key) do |store|
+      invoke(:decrement, key) do |store|
         alter(key, amount * -1, options)
       end
     end
@@ -258,7 +249,7 @@ module Readthis
     def write_multi(hash, options = {})
       options = merged_options(options)
 
-      invoke_write(:write_multi, hash.keys) do |store|
+      invoke(:write_multi, hash.keys) do |store|
         store.multi do
           hash.each { |key, value| write_entity(key, value, store, options) }
         end
@@ -329,7 +320,7 @@ module Readthis
     #
     #   cache.clear #=> 'OK'
     def clear(options = {})
-      invoke_write(:clear, '*', &:flushdb)
+      invoke(:clear, '*', &:flushdb)
     end
 
     protected
@@ -369,12 +360,6 @@ module Readthis
     def invoke_read(operation, key, &block)
       instrument(operation, key) do
         read_pool.with(&block)
-      end
-    end
-
-    def invoke_write(operation, key, &block)
-      instrument(operation, key) do
-        write_pool.with(&block)
       end
     end
 
